@@ -16,7 +16,7 @@ file_path = "googleQ32025.pdf"
 llm = ChatOpenAI(api_key=OPENAI_API_KEY)
 embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY)
 
-def create_vector_store():
+def init():
     delete_vector_store(chroma_db_path)
 
     # 1. Load and preprocess the PDF document
@@ -28,16 +28,16 @@ def create_vector_store():
     # 3. Create a vector store from the chunks
     vector_store = create_chroma_vector_store(all_splits, embeddings, chroma_db_path)
 
-    retriever = vector_store.as_retriever()
+    #retriever = vector_store.as_retriever()
     #return retriever
 
     # 5. Build the RAG pipeline using LCEL
-    rag_chain =  create_rag_chain(llm, retriever)
+    #rag_chain =  create_rag_chain(llm, retriever)
 
     # 6. Run the RAG pipeline
-    response = rag_chain.invoke("Which is the dividend policy of the company?")
-    console = Console()
-    console.print(Markdown(response.content))
+    #response = rag_chain.invoke("Which is the dividend policy of the company?")
+    #console = Console()
+    #console.print(Markdown(response.content))
 
 
 def find_in_document():
@@ -65,7 +65,7 @@ def run_master_agent(query: str):
     return response.content
     return response
 
-create_vector_store()
+init()
 
 
 
