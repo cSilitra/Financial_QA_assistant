@@ -1,23 +1,52 @@
 import os
-import json
 import shutil
 from dotenv import load_dotenv, find_dotenv
-from unstructured_client import UnstructuredClient
-from unstructured_client.models import shared,operations
-from unstructured_client.models.errors import SDKError
-from unstructured.staging.base import dict_to_elements, elements_to_json
-from langchain.chat_models import init_chat_model
-from langchain_unstructured import UnstructuredLoader
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.runnables import RunnablePassthrough, RunnableMap
 from langchain_core.prompts import ChatPromptTemplate
-from typing import Callable, TypedDict
-_ = load_dotenv(find_dotenv())
 
-#llm = ChatOpenAI(temperature = 0.0, model='gpt-5')
+_ = load_dotenv(find_dotenv())
+chroma_db_path = "./chroma_db"
+
+def load_documents_from_uploaded_pdf(uploaded_file) -> list[Document]:
+    """Load documents from a Streamlit uploaded PDF file or file path.
+    
+    Args:
+        uploaded_file: Either a Streamlit UploadedFile object or a string file path
+        
+    Returns:
+        list[Document]: List of LangChain document objects
+    """
+    import tempfile
+    
+    if isinstance(uploaded_file, str):
+        # If it's a file path, use it directly
+        return load_documents_with_PyPDFLoader(uploaded_file)
+    
+    # For Streamlit uploaded file, we need to save it temporarily
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            # If it's a Streamlit UploadedFile, it has a getvalue() method
+            if hasattr(uploaded_file, 'getvalue'):
+                tmp_file.write(uploaded_file.getvalue())
+            # If it's a regular file-like object, use read()
+            else:
+                tmp_file.write(uploaded_file.read())
+            tmp_file.flush()
+            
+            # Load documents using the temporary file
+            documents = load_documents_with_PyPDFLoader(tmp_file.name)
+            
+        # Clean up the temporary file
+        import os
+        os.unlink(tmp_file.name)
+        
+        return documents
+    except Exception as e:
+        raise ValueError(f"Error loading PDF: {str(e)}")
 
 
 def load_documents_with_PyPDFLoader(file_path: str) -> list[Document]:
@@ -29,103 +58,68 @@ def load_documents_with_PyPDFLoader(file_path: str) -> list[Document]:
 def create_chunks(documents: list[Document]) -> list[Document]:
     """Create chunks from documents using RecursiveCharacterTextSplitter."""
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=100,  # chunk size (characters)
-        chunk_overlap=20,  # chunk overlap (characters)
+        chunk_size=1500,  # chunk size (characters)
+        chunk_overlap=200,  # chunk overlap (characters)
         add_start_index=True,  # track index in original document
+        length_function=len
     )
     all_splits  = text_splitter.split_documents(documents)
     return all_splits
 
-def create_chroma_vector_store(documents: list[Document], embeddings, chroma_db_path) -> Chroma:
-    """Create a Chroma vector store from documents."""
-    vector_store = Chroma.from_documents(
-        documents=documents,
-        embedding=embeddings,
-        persist_directory=chroma_db_path  # Optional: to save locally
-    )
+def create_chroma_vector_store(documents: list[Document], embeddings) -> Chroma:
+    """Create a Chroma vector store from documents or add to existing one.
+    
+    If a vector store already exists at chroma_db_path, adds the new documents to it.
+    If no vector store exists, creates a new one.
+    
+    Args:
+        documents: List of documents to add to the vector store
+        embeddings: Embeddings model to use for vectorization
+        
+    Returns:
+        Chroma: The vector store instance
+    """
+    # Check if vector store already exists
+    if os.path.exists(chroma_db_path):
+        # Load existing vector store
+        vector_store = Chroma(
+            persist_directory=chroma_db_path,
+            embedding_function=embeddings
+        )
+        # Add new documents to existing store
+        vector_store.add_documents(documents)
+    else:
+        # Create new vector store if none exists
+        vector_store = Chroma.from_documents(
+            documents=documents,
+            embedding=embeddings,
+            persist_directory=chroma_db_path
+        )
+    
+    # Make sure to persist the changes
+    #vector_store.persist()
     return vector_store
 
 
-def load_pdf_with_unstructured(file_path):
-    UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
-    try:
-        loader = UnstructuredLoader([file_path])
-                                    #api_key=UNSTRUCTURED_API_KEY, 
-                                    #partition_via_api=True)
-        return loader.load()
-    except SDKError as e:
-        print(e)
-    
-
-def preprocess_pdf_with_unstructured(file_path):
-    UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
-    client  = UnstructuredClient(
-        api_key_auth=UNSTRUCTURED_API_KEY,
-        #server_url=UNSTRUCTURED_API_URL,
-    )
-    
-    
-    # read the document through a unstructured API
-    with open(file_path, "rb") as f:
-        files=shared.Files(
-            content=f.read(), 
-            file_name=file_path,
-        )
-
-    req = shared.PartitionParameters(
-        files=files,
-        strategy='hi_res',
-        #pdf_infer_table_structure=True,
-        languages=["eng"],
-    )
-    try:
-        request = operations.PartitionRequest(partition_parameters=req)
-        resp = client.general.partition(request=request)
-
-        return resp.elements
-    except SDKError as e:
-        print(e)
-
-def get_openAI_model(model):
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-    model = init_chat_model(model,
-            api_key=OPENAI_API_KEY,
-            temperature=0.5,
-            timeout=10,
-            max_tokens=1000
-            )
-    
-def get_claude_model(model):
-    CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
-
-    model = init_chat_model(model,
-            api_key=CLAUDE_API_KEY,
-            temperature=0.5,
-            timeout=10,
-            max_tokens=1000
-            )
-    
 def print_vectore_store_info(vector_store):
-    #all_docs = vector_store.get()['documents']
     all_docs = vector_store.get()
     for key, value in all_docs.items():
         print(f'{key}: {value}')
 
-def delete_vector_store(chroma_db_path):
-    #vector_store.delete_collection()
+def delete_vector_store():
     if os.path.exists(chroma_db_path):
         shutil.rmtree(chroma_db_path)
 
 def create_rag_chain(llm, retriever):
     # If you don't know the answer, just say that you don't know, don't try to make up an answer.
     prompt = ChatPromptTemplate.from_template("""
-        You are a helpful assistant specializad in stock market. 
+        You are a helpful analyst. 
         Use the following context to answer the question.
         
         Contexts may include financial reports, market analysis, table, and economic indicators.
         Respond in markdown format.
-    
+        If you don't know the answer, just say that you don't know, don't try to make up an answer.
+                                                     
         Context:
         {context}
 
