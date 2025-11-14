@@ -5,11 +5,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from main import run_master_agent, crate_vector_store
+from main import run_master_agent, crate_vector_store, run_gemini_file_search, run_base_llm, run_base_llm
 from utils import delete_vector_store
 
 # set browser tab Title and icon
 st.set_page_config(page_title="Ai chat", page_icon="🤖")
+st.set_page_config(layout="wide")
 
 # set page title and description
 st.title("Company report AI Assistant 🤖")
@@ -43,10 +44,73 @@ query = st.text_area(
 )
 
 # generate response
-if st.button("Generate Response") and query:
-    try:
-        result = run_master_agent(query)
-        st.subheader("📊 Final response")
-        st.markdown(result)
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+if st.button("Generate Response"):
+    if not query:
+        st.error("Please enter a query.")
+    else:
+        try:
+            st.subheader("📊 Final response")
+            
+            # Dictionary to store results from both threads
+            results = {'base': None, 'geminiRAG': None, 'base_error': None, 'geminiRAG_error': None,'llm':None, 'llm_error':None}
+            
+            # Function to run base RAG agent in a thread
+            def run_base_agent():
+                try:
+                    results['base'] = run_master_agent(query)
+                except Exception as e:
+                    results['base_error'] = str(e)
+            
+            # Function to run Gemini search in a thread
+            def run_gemini_search():
+                try:
+                    results['geminiRAG'] = run_gemini_file_search(query)
+                except Exception as e:
+                    results['geminiRAG_error'] = str(e)
+
+          # Function to run basic llm search in a thread
+            def run_basic_llm_search():
+                try:
+                    results['llm'] = run_base_llm(query)
+                except Exception as e:
+                    results['llm_error'] = str(e)
+            
+            # Create and start both threads
+            thread_base = threading.Thread(target=run_base_agent)
+            thread_gemini = threading.Thread(target=run_gemini_search)
+            thread_llm = threading.Thread(target=run_basic_llm_search)
+            
+            thread_base.start()
+            thread_gemini.start()
+            thread_llm.start()
+            
+            # Wait for both threads to complete
+            thread_base.join()
+            thread_gemini.join()
+            thread_llm.join()
+            
+            # Display results from both sources
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write("**Base RAG (gpt-5-mini) Response:**")
+                if results['base_error']:
+                    st.error(f"Error: {results['base_error']}")
+                else:
+                    st.markdown(results['base'])
+            
+            with col2:
+                st.write("**Gemini-2.5-flash response:**")
+                if results['geminiRAG_error']:
+                    st.error(f"Error: {results['geminiRAG_error']}")
+                else:
+                    st.markdown(results['geminiRAG'])
+            with col3:
+                st.write("**LLM(gpt-5-mini) Response:**")
+                if results['llm_error']:
+                    st.error(f"Error: {results['llm_error']}")
+                else:
+                    st.markdown(results['llm'])
+            
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")

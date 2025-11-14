@@ -6,13 +6,15 @@ from rich.console import Console
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
-
+from geminiFileSearchUtils import run_gemini_search_rag
+from openai import OpenAI
+    
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 file_path = "googleQ32025.pdf"
 
 # 0. Init
-llm = ChatOpenAI(api_key=OPENAI_API_KEY)
+llm = ChatOpenAI(api_key=OPENAI_API_KEY,model="gpt-5-mini")
 embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY)
 
 def crate_vector_store(file):
@@ -70,9 +72,22 @@ def run_master_agent(query: str):
     retriever = vector_store.as_retriever()
     rag_chain =  create_rag_chain(llm, retriever)
     response = rag_chain.invoke(query)
+    print ('base',response)
     return response.content
 
+def run_gemini_file_search(query: str):
+    print("Running gemini search rag...")
+    response = run_gemini_search_rag(query)
+    print ('gemini',response)
+    return response
 
+def run_base_llm(query: str):
+    print("Running gpt-5-mini...")
+    openAiclient = OpenAI(api_key=OPENAI_API_KEY)
+    response = openAiclient.responses.create(
+    model="gpt-5-mini",
+    input=query)
+    return response.output_text
 
 def run_app():
     question ="how much is the dividend when it will be paid, and for which Company’s Class"
